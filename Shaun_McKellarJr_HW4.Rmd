@@ -1,0 +1,265 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+library(caret)
+library(e1071)
+library(rpart)
+library(tidyverse)
+library(rpart.plot)
+library(readxl)
+library(stats)
+library(MASS)
+library(Rcmdr)
+library(neuralnet)
+library(sensitivity)
+```
+
+```{r}
+getwd()
+```
+
+```{r}
+setwd("/Users/shaunmckellarjr/Desktop/SCM 651-Business Analytics/Week 4 HW")
+```
+
+
+```{r}
+Universal_Bank_DS <- read_excel("/Users/shaunmckellarjr/Desktop/SCM 651-Business Analytics/Week 4 HW/universal_bank.xlsx")
+```
+
+```{r}
+str(Universal_Bank_DS)
+```
+
+```{r}
+summary(Universal_Bank_DS)
+```
+
+```{r}
+logit_model <- glm(PersonalLoan ~ Age + Experience + Income + Family + CCAvg + Education + Mortgage + SecuritiesAccount + CDAccount + Online + CreditCard, 
+                   data = Universal_Bank_DS, 
+                   family = binomial(link = "logit"))
+```
+
+```{r}
+summary(logit_model)
+```
+
+```{r}
+logit_model_interactions <- glm(PersonalLoan ~ Income + Family + CCAvg + Education + SecuritiesAccount + CDAccount + Online + CreditCard +
+                                  Income:Education + Family:CCAvg + Income:Family + CDAccount:SecuritiesAccount, 
+                                data = Universal_Bank_DS, family = "binomial")
+```
+
+```{r}
+summary(logit_model_interactions)
+```
+
+```{r}
+plot(logit_model_interactions)
+```
+
+```{r}
+plot(logit_model)
+```
+
+
+```{r}
+# Probit Regression Model - Main Effects Only
+probit_model_main <- glm(PersonalLoan ~ Age + Experience + Income + Family + CCAvg + Education + Mortgage + SecuritiesAccount + CDAccount + Online + CreditCard,
+                         family = binomial(link = "probit"), 
+                         data = Universal_Bank_DS)
+```
+
+```{r}
+# Summary of Probit Model - Main Effects Only
+summary(probit_model_main)
+```
+
+```{r}
+# Including interactions in the probit model
+interaction_model <- glm(PersonalLoan ~ Income + Family + CCAvg + Education + SecuritiesAccount +
+                         CDAccount + Online + CreditCard +
+                         Income:Education + Family:CCAvg + Income:Family + CDAccount:SecuritiesAccount,
+                         family = "binomial", data = Universal_Bank_DS)
+
+```
+
+
+```{r}
+# Summary of the probit interaction model
+summary(interaction_model)
+```
+
+```{r}
+# Building the final logistic regression model
+final_model <- glm(PersonalLoan ~ Income + Education + Family + Income:Education + Income:Family,
+                   family = binomial(link = "logit"), data = Universal_Bank_DS)
+```
+
+
+```{r}
+# View the summary of the model
+summary(final_model)
+```
+
+```{r}
+# Extract coefficients
+model_coefficients <- coef(final_model)
+print(model_coefficients)
+```
+
+```{r}
+# Creating a range for each variable
+income_range <- seq(from = min(Universal_Bank_DS$Income), to = max(Universal_Bank_DS$Income), length.out = 100)
+education_range <- unique(Universal_Bank_DS$Education)
+family_range <- unique(Universal_Bank_DS$Family)
+
+# Creating a grid of all combinations
+sensitivity_data <- expand.grid(Income = income_range, Education = education_range, Family = family_range)
+
+# Calculating interaction terms
+sensitivity_data$Income_Education <- sensitivity_data$Income * sensitivity_data$Education
+sensitivity_data$Income_Family <- sensitivity_data$Income * sensitivity_data$Family
+
+```
+
+
+```{r}
+# Predicting probabilities
+sensitivity_data$Probability <- predict(final_model, newdata = sensitivity_data, type = "response")
+
+```
+
+```{r}
+# Plotting Probability vs. Income for different levels of Education
+ggplot(sensitivity_data, aes(x = Income, y = Probability, color = as.factor(Education))) +
+    geom_line() +
+    labs(title = "Probability of Taking a Loan by Income and Education Level",
+         x = "Income",
+         y = "Probability",
+         color = "Education Level")
+```
+
+```{r}
+# Select a few representative levels of Income for clarity in the plot
+income_levels <- quantile(sensitivity_data$Income, probs = seq(0, 1, 0.25))
+```
+
+```{r}
+# Plotting
+ggplot(sensitivity_data %>% filter(Income %in% income_levels), 
+       aes(x = Family, y = Probability, color = as.factor(Income))) +
+    geom_line() +
+    labs(title = "Probability of Taking a Loan by Family Size and Income Level",
+         x = "Family Size",
+         y = "Probability",
+         color = "Income Level")
+```
+
+```{r}
+# Preparing data for the neural network. Note that neural networks generally require scaled data.
+# For simplicity, we'll use the data as is because the focus here is to demonstrate the steps.
+# In practice, you should scale the data before training a neural network.
+```
+
+```{r}
+# Manually create interaction terms in the data frame
+Universal_Bank_DS$Income_Education <- Universal_Bank_DS$Income * Universal_Bank_DS$Education
+Universal_Bank_DS$Income_Family <- Universal_Bank_DS$Income * Universal_Bank_DS$Family
+```
+
+
+```{r}
+# Training the neural network model
+set.seed(123)  # for reproducibility
+nn_model <- neuralnet(PersonalLoan ~ Income + Education + Family + Income_Education + Income_Family,
+                      data = Universal_Bank_DS,  # using the whole dataset for demonstration
+                      hidden = c(5),             # one hidden layer with 5 neurons
+                      linear.output = FALSE)     # since it's a classification problem
+```
+
+```{r}
+# Plotting the neural network
+plot(nn_model)
+```
+
+```{r}
+# Computing predictions on a test set (if available) or the same dataset used for training here
+nn_predictions <- compute(nn_model, Universal_Bank_DS[, c("Income", "Education", "Family", "Income_Education", "Income_Family")])
+
+```
+
+```{r}
+# The results are probabilities. Converting to binary predictions with threshold 0.5
+predicted_classes <- ifelse(nn_predictions$net.result > 0.5, 1, 0)
+```
+
+```{r}
+# Assuming the actual classes are in the 'PersonalLoan' column of your dataset
+actual_classes <- Universal_Bank_DS$PersonalLoan
+```
+
+```{r}
+# Evaluating the performance using a confusion matrix
+conf_matrix <- table(Predicted = predicted_classes, Actual = actual_classes)
+print(conf_matrix)
+```
+
+```{r}
+# Calculating accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+print(paste("Accuracy of the neural network model:", accuracy))
+```
+
+```{r}
+# Create a new data frame for sensitivity analysis with ranges for your variables
+sensitivity_data_nn <- expand.grid(
+  Income = seq(from = min(Universal_Bank_DS$Income), to = max(Universal_Bank_DS$Income), length.out = 100),
+  Education = seq(from = min(Universal_Bank_DS$Education), to = max(Universal_Bank_DS$Education), length.out = 100),
+  Family = seq(from = min(Universal_Bank_DS$Family), to = max(Universal_Bank_DS$Family), length.out = 100)
+)
+```
+
+```{r}
+# Add interaction terms for the neural network
+sensitivity_data_nn$Income_Education <- sensitivity_data_nn$Income * sensitivity_data_nn$Education
+sensitivity_data_nn$Income_Family <- sensitivity_data_nn$Income * sensitivity_data_nn$Family
+```
+
+```{r}
+# Generate predictions
+nn_predictions <- compute(nn_model, sensitivity_data_nn)
+```
+
+```{r}
+# Add the predictions to your data frame
+sensitivity_data_nn$Predicted_Probability <- nn_predictions$net.result
+```
+
+```{r}
+# Plotting the effect of each variable on the predicted probability
+
+# Plotting the effect of Income
+ggplot(sensitivity_data_nn, aes(x = Income, y = Predicted_Probability)) +
+  geom_line() +
+  facet_wrap(~Education) + # Separating plots for each Education level
+  labs(title = "Effect of Income on the Probability of Taking a Loan",
+       x = "Income",
+       y = "Predicted Probability")
+
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
